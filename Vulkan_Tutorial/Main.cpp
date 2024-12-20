@@ -46,11 +46,6 @@ private: // Vukan helpers
     /// <summary>
     /// Callback for printing validation layer messages 
     /// </summary>
-    /// <param name="messageSeverity"></param>
-    /// <param name="messageType"></param>
-    /// <param name="pCallbackData"></param>
-    /// <param name="pUserData"></param>
-    /// <returns></returns>
     static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
         VkDebugUtilsMessageTypeFlagsEXT messageType,
@@ -79,7 +74,7 @@ private: // Vukan helpers
         {
             throw std::runtime_error("Validation layers requested, but not avaliable");
         }
-
+        
         // Set up information about our instance of vulkan 
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -95,15 +90,27 @@ private: // Vukan helpers
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         createInfo.pApplicationInfo = &appInfo;
         
+
+        VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
         // Additional info is using validation layers 
         if (enableValidationLayers)
         {
             createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
-            createInfo.ppEnabledExtensionNames = validationLayers.data();
+            createInfo.ppEnabledLayerNames = validationLayers.data();
+
+            PopulateDebugMessengerCreateInfo(debugCreateInfo);
+            createInfo.pNext = (VkDebugUtilsMessengerCreateInfoEXT*)&debugCreateInfo;
         }
         else
         {
             createInfo.enabledExtensionCount = 0;
+
+            createInfo.pNext = nullptr;
+        }
+
+        if (vkCreateInstance(&createInfo, nullptr, &instance))
+        {
+            throw std::runtime_error("Failed to create instance!");
         }
 
 
@@ -113,15 +120,12 @@ private: // Vukan helpers
         // Getting the extensions for glfw :)
         glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
-        auto extensions = GetRequiredExtensions();
-        createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size()); // Set extension count 
-        createInfo.ppEnabledExtensionNames = extensions.data();
+        //auto extensions = GetRequiredExtensions();
+        //createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size()); // Set extension count 
+        //createInfo.ppEnabledExtensionNames = extensions.data();
 
         // Now we can make our vulkan instace! 
-        if (vkCreateInstance(&createInfo, nullptr, &instance))
-        {
-            throw std::runtime_error("Failed to create instance!");
-        }
+        
     }
     
     /// <summary>
@@ -136,13 +140,15 @@ private: // Vukan helpers
         vkEnumerateInstanceLayerProperties(&layerCount, avaliableLayers.data());
         
         // Iterate through all validation types to see if 
-        // the desired validation layer is there
+        // the desired validation layer is there VK_LAYER_KHRONOS_validation
         for (const char* layerName : validationLayers)
         {
             bool layerFound = false;
 
             for (const auto& layerProperties : avaliableLayers)
             {
+                //std::cout << layerProperties.layerName << std::endl;
+
                 // String values are identical 
                 if (strcmp(layerName, layerProperties.layerName) == 0)
                 {
@@ -186,19 +192,9 @@ private: // Vukan helpers
         // Don't setup if not debugging 
         if (!enableValidationLayers) return;
 
-        VkDebugUtilsMessengerCreateInfoEXT createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-        createInfo.messageSeverity = // Severity of messages this messenger will callback for 
-            VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-            VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
-            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-        createInfo.messageType = 
-            VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | 
-            VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | 
-            VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-        createInfo.pfnUserCallback = DebugCallback; // Cunction to call on callback 
-        createInfo.pUserData = nullptr; // Optional: Passes pointer to data that can be manipulated on callback 
-
+        VkDebugUtilsMessengerCreateInfoEXT createInfo;
+        PopulateDebugMessengerCreateInfo(createInfo);
+       
         if (CreateDebugUtilsMessangerEXT(instance, &createInfo, nullptr, &debugMessenger) != VK_SUCCESS)
         {
             throw std::runtime_error("Failed to set up debug messenger!");
@@ -248,6 +244,18 @@ private: // Vukan helpers
         }
     }
 
+    /// <summary>
+    /// Populates a messenger 
+    /// </summary>
+    void PopulateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo)
+    {
+        createInfo = {};
+        createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+        createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+        createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+        createInfo.pfnUserCallback = DebugCallback;
+    }
+
 private: // Main functions 
     void InitWindow()
     {
@@ -267,6 +275,7 @@ private: // Main functions
     void InitVulkan() 
     {
         CreateInstance();
+        SetupDebugMessenger();
     }
 
     void MainLoop() 
