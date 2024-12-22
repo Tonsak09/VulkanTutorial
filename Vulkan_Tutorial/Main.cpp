@@ -8,6 +8,8 @@
 #include <vector>
 #include <cstring>
 
+#include <optional>
+
 class HelloTriangleApplication {
 public:
     void Run() {
@@ -20,7 +22,6 @@ public:
 private:
     GLFWwindow* window;
     VkInstance instance;
-
 
     const uint32_t WIDTH = 800;
     const uint32_t HEIGHT = 600;
@@ -43,29 +44,8 @@ private:
     
 
 private: // Vukan helpers 
-    /// <summary>
-    /// Callback for printing validation layer messages 
-    /// </summary>
-    static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
-        VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-        VkDebugUtilsMessageTypeFlagsEXT messageType,
-        const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-        void* pUserData) // Contains a pointer to oursetup and lets us set data to it 
-    {
-        // Note: We can use different logic based on the message severity 
-        //      VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT: Diagnostic message
-        //      VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT : Informational message like the creation of a resource
-        //      VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT : Message about behavior that is not necessarily an error, but very likely a bug in your application
-        //      VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT : Message about behavior that is invalid and may cause crashes
-
-        if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
-        {
-            // Important to show 
-        }
-
-        std::cerr << "Validation layer: " << pCallbackData->pMessage << std::endl;
-        return VK_FALSE;
-    }
+   
+    #pragma region Instance Creation 
 
     void CreateInstance()
     {
@@ -117,7 +97,56 @@ private: // Vukan helpers
         }
 
     }
-    
+
+    /// <summary>
+    /// Gets the required extensions for the current instance that
+    /// connects it to GLFW 
+    /// </summary>
+    std::vector<const char*> GetRequiredExtensions()
+    {
+        uint32_t glfwExtensionCount = 0;
+        const char** glfwExtensions;
+        glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+
+        std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+
+        // Check if validation layers are required 
+        if (enableValidationLayers)
+        {
+            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        }
+
+        return extensions;
+    }
+
+    #pragma endregion 
+
+    #pragma region Validation Layers
+
+    /// <summary>
+   /// Callback for printing validation layer messages 
+   /// </summary>
+    static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
+        VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+        VkDebugUtilsMessageTypeFlagsEXT messageType,
+        const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+        void* pUserData) // Contains a pointer to oursetup and lets us set data to it 
+    {
+        // Note: We can use different logic based on the message severity 
+        //      VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT: Diagnostic message
+        //      VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT : Informational message like the creation of a resource
+        //      VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT : Message about behavior that is not necessarily an error, but very likely a bug in your application
+        //      VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT : Message about behavior that is invalid and may cause crashes
+
+        if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+        {
+            // Important to show 
+        }
+
+        std::cerr << "Validation layer: " << pCallbackData->pMessage << std::endl;
+        return VK_FALSE;
+    }
+
     /// <summary>
     /// Checks if all requested layers are avaliable 
     /// </summary>
@@ -128,7 +157,7 @@ private: // Vukan helpers
 
         std::vector<VkLayerProperties> avaliableLayers(layerCount);
         vkEnumerateInstanceLayerProperties(&layerCount, avaliableLayers.data());
-        
+
         // Iterate through all validation types to see if 
         // the desired validation layer is there VK_LAYER_KHRONOS_validation
         for (const char* layerName : validationLayers)
@@ -155,26 +184,9 @@ private: // Vukan helpers
     }
 
     /// <summary>
-    /// Gets the required extensions for the current instance that
-    /// connects it to GLFW 
+    /// Sets up a messenger that gives us information
+    /// from our vulkan instance 
     /// </summary>
-    std::vector<const char*> GetRequiredExtensions()
-    {
-        uint32_t glfwExtensionCount = 0;
-        const char** glfwExtensions;
-        glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
-        std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
-
-        // Check if validation layers are required 
-        if (enableValidationLayers)
-        {
-            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-        }
-
-        return extensions;
-    }
-
     void SetupDebugMessenger()
     {
         // Don't setup if not debugging 
@@ -182,7 +194,7 @@ private: // Vukan helpers
 
         VkDebugUtilsMessengerCreateInfoEXT createInfo;
         PopulateDebugMessengerCreateInfo(createInfo);
-       
+
         if (CreateDebugUtilsMessangerEXT(instance, &createInfo, nullptr, &debugMessenger) != VK_SUCCESS)
         {
             throw std::runtime_error("Failed to set up debug messenger!");
@@ -244,6 +256,152 @@ private: // Vukan helpers
         createInfo.pfnUserCallback = DebugCallback;
     }
 
+    #pragma endregion
+
+    #pragma region Physical Devices and Queue Families 
+
+    /// <summary>
+    /// Choose a graphics card that supports the 
+    /// features we require
+    /// </summary>
+    void PickPhysicalDevice()
+    {
+        // The device we will use. It is destroyed implicitly 
+        // when the instance is destroyed 
+        VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+    
+        // Get amount of devices avaliable 
+        uint32_t deviceCount = 0;
+        vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+
+        if (deviceCount == 0)
+        {
+            throw std::runtime_error("Failed to find GPUs with Vulkan support!");
+        }
+
+        std::vector<VkPhysicalDevice> devices(deviceCount);
+        vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+        
+        // Iterate through all avaliable GPUs to see if 
+        // any are valid. Picks the first valid 
+        for (const auto& device : devices)
+        {
+            if (IsDeviceSuitable(device))
+            {
+                physicalDevice = device;
+                break;
+            }
+        }
+
+        if (physicalDevice == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("Failed to find a suitable GPU!");
+        }
+    }
+
+    /// <summary>
+    /// Checks whether the device is appropriate for 
+    /// our requirements 
+    /// </summary>
+    bool IsDeviceSuitable(VkPhysicalDevice device)
+    {
+        // NOTE: As an alternative we could give a score
+        //       for each feature that we desire and pick
+        //       the one with the highest
+
+        QueueFamilyIndicies indicies = FindQueueFamilies(device);
+        return indicies.IsComplete();
+
+
+
+        // Following code searches for a device that has a discrete GPU
+        // and geometry shader features.
+
+        // Just because our device has the capabilities to work with the
+        // features we want, it does not mean we have access to those 
+        // queues just yet. We need access to the family the designates
+        // rules to those commands which is why we have functionallity that
+        // checks specifically for that above. 
+
+        /*
+         // Properties include name, type and support of vulkan version 
+        VkPhysicalDeviceProperties deviceProperties;
+        vkGetPhysicalDeviceProperties(device, &deviceProperties);
+
+        // Features include texture compression, 64 bit floats 
+        // and multi viewport rendering 
+        VkPhysicalDeviceFeatures deviceFeatures;
+        vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+        return deviceProperties.deviceType == 
+            VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
+            deviceFeatures.geometryShader;
+        */
+       
+    }
+
+
+    /// <summary>
+    /// Bundle of our queues 
+    /// </summary>
+    struct QueueFamilyIndicies
+    {
+        // Note: We use an optional because it allows
+        //       us to check if there is actually a 
+        //       value contained. More readable than
+        //       std::pair<type, bool> 
+
+        std::optional<uint32_t> graphicsFamily;
+
+        bool IsComplete()
+        {
+            return graphicsFamily.has_value();
+        }
+    };
+
+    /// <summary>
+    /// Searches for the queue families this device 
+    /// has access to 
+    /// </summary>
+    /// <returns></returns>
+    QueueFamilyIndicies FindQueueFamilies(VkPhysicalDevice device)
+    {
+        // Searching for graphics queue family 
+        QueueFamilyIndicies indicies;
+
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+        // Properties include type of operations supported, num of
+        // queues able to be created from family, etc 
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+        // Sarch for family with graphics queue 
+        int i = 0;
+        for (const auto& queueFamily : queueFamilies)
+        {
+            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            {
+                // Store id of graphics family 
+                indicies.graphicsFamily = i;
+            }
+
+            if (indicies.IsComplete())
+            {
+                break;
+            }
+
+            i++;
+        }
+
+        return indicies;
+    }
+
+    #pragma endregion
+
+    
+
 private: // Main functions 
     void InitWindow()
     {
@@ -264,6 +422,7 @@ private: // Main functions
     {
         CreateInstance();
         SetupDebugMessenger();
+        PickPhysicalDevice();
     }
 
     void MainLoop() 
