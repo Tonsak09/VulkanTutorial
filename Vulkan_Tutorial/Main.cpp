@@ -90,6 +90,9 @@ private: // Vukan helpers
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         createInfo.pApplicationInfo = &appInfo;
         
+        auto extensions = GetRequiredExtensions();
+        createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+        createInfo.ppEnabledExtensionNames = extensions.data();
 
         VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
         // Additional info is using validation layers 
@@ -113,19 +116,6 @@ private: // Vukan helpers
             throw std::runtime_error("Failed to create instance!");
         }
 
-
-        uint32_t glfwExtensionCount = 0;
-        const char** glfwExtensions;
-
-        // Getting the extensions for glfw :)
-        glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
-        //auto extensions = GetRequiredExtensions();
-        //createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size()); // Set extension count 
-        //createInfo.ppEnabledExtensionNames = extensions.data();
-
-        // Now we can make our vulkan instace! 
-        
     }
     
     /// <summary>
@@ -147,8 +137,6 @@ private: // Vukan helpers
 
             for (const auto& layerProperties : avaliableLayers)
             {
-                //std::cout << layerProperties.layerName << std::endl;
-
                 // String values are identical 
                 if (strcmp(layerName, layerProperties.layerName) == 0)
                 {
@@ -269,7 +257,7 @@ private: // Main functions
         // Generate window 
         //      Fourth parameter lets us choose a montitor to open to
         //      Fifth parameter is only relevant to OpenGL
-        window = glfwCreateWindow(800, 600, "Vulkan", nullptr, nullptr);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
     }
 
     void InitVulkan() 
