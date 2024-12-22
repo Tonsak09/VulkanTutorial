@@ -41,6 +41,12 @@ private:
 
     VkDebugUtilsMessengerEXT debugMessenger;
 
+
+    // The device we will use. It is destroyed implicitly 
+    // when the instance is destroyed 
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+    VkDevice device; // Logic device 
+    VkQueue graphicsQueue; // Implicitly cleaned 
     
 
 private: // Vukan helpers 
@@ -266,10 +272,6 @@ private: // Vukan helpers
     /// </summary>
     void PickPhysicalDevice()
     {
-        // The device we will use. It is destroyed implicitly 
-        // when the instance is destroyed 
-        VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    
         // Get amount of devices avaliable 
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
@@ -400,7 +402,73 @@ private: // Vukan helpers
 
     #pragma endregion
 
-    
+    #pragma region Logic Device and Queues
+
+    /// <summary>
+    /// Generate a logic device which allows us to interface
+    /// with 
+    /// </summary>
+    void CreateLogicalDevice()
+    {
+        QueueFamilyIndicies indices = FindQueueFamilies(physicalDevice);
+        
+        // Generate a queueCreateInfo specifically for 
+        // for the graphics family 
+        VkDeviceQueueCreateInfo queueCreateInfo{};
+        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
+        queueCreateInfo.queueCount = 1;
+
+        // Note: We can create a small number of queues
+        //       for our desired queue family but we will
+        //       most likely not need more than one 
+
+        // We can assign priority to queue which influences
+        // scheduling. Necessary even for a single queue 
+        float queuePriority = 1.0f;
+        queueCreateInfo.pQueuePriorities = &queuePriority;
+
+        // What features will we be requesting from our
+        // device queue 
+        VkPhysicalDeviceFeatures deviceFeatures{}; 
+
+
+        VkDeviceCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        
+        // Fill out queue info 
+        createInfo.pQueueCreateInfos = &queueCreateInfo;
+        createInfo.queueCreateInfoCount = 1;
+
+        // Attach features 
+        createInfo.pEnabledFeatures = &deviceFeatures;
+
+
+        // Specify any device specific extensions 
+        createInfo.enabledExtensionCount = 0;
+
+        // Connect validation layers 
+        if (enableValidationLayers)
+        {
+            createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+            createInfo.ppEnabledLayerNames = validationLayers.data();
+        }
+        else
+        {
+            createInfo.enabledLayerCount = 0;
+        }
+
+        // Create device 
+        if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to create logical device!");
+        }
+
+        // Create handle to interface with graphics queue
+        vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
+    }
+
+    #pragma endregion
 
 private: // Main functions 
     void InitWindow()
@@ -423,6 +491,7 @@ private: // Main functions
         CreateInstance();
         SetupDebugMessenger();
         PickPhysicalDevice();
+        CreateLogicalDevice();
     }
 
     void MainLoop() 
@@ -435,6 +504,8 @@ private: // Main functions
 
     void Cleanup() 
     {
+        vkDestroyDevice(device, nullptr);
+
         if (enableValidationLayers)
         {
             DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
