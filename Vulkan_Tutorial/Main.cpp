@@ -21,6 +21,8 @@
 
 #include <optional>
 
+#include <fstream>
+
 class HelloTriangleApplication {
 public:
     void Run() {
@@ -886,6 +888,99 @@ private: // Vukan helpers
 
     #pragma endregion
 
+    #pragma region Graphics Pipeline
+
+    /// <summary>
+    /// Initilizes the graphics pipeline 
+    /// </summary>
+    void CreateGraphicsPipeline()
+    {
+        // TODO: Automate the process of pipeline creation 
+
+        auto vertShaderCode = ReadFile("shadaers/vert.spv");
+        auto fragShaderCode = ReadFile("shaders/frag.spv");
+
+        VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
+        VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
+
+
+        // To use the shader we need to assign them to their 
+        // repsepctive pipeline stage 
+
+
+        // Note: The specilized info allows us to sepcify values for 
+        //       shader constants. More efficient than configuring 
+        //       variables during render time 
+
+        VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+        vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+        vertShaderStageInfo.module = vertShaderModule;
+        vertShaderStageInfo.pName = "main";
+        vertShaderStageInfo.pSpecializationInfo = nullptr;
+        
+        VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+        fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        fragShaderStageInfo.module = fragShaderModule;
+        fragShaderStageInfo.pName = "main";
+        fragShaderStageInfo.pSpecializationInfo = nullptr;
+
+        VkPipelineShaderStageCreateInfo shaderStages[]{ vertShaderStageInfo, fragShaderStageInfo };
+
+        // Can be cleaned up after passing it to the graphics pieline 
+        vkDestroyShaderModule(device, vertShaderModule, nullptr);
+        vkDestroyShaderModule(device, fragShaderModule, nullptr);
+    }
+
+    /// <summary>
+    /// Reads a file at the given path and simply returns it
+    /// as a vector of its chars 
+    /// </summary>
+    static std::vector<char> ReadFile(const std::string& fileName)
+    {
+        // ate:     Start reading at end of file
+        // binary:  Read the file as binary avoiding text transformations 
+        std::ifstream file(fileName, std::ios::ate | std::ios::binary);
+
+        if (!file.is_open())
+        {
+            throw std::runtime_error("Failed to open file!");
+        }
+
+        size_t fileSize = (size_t)file.tellg();
+        std::vector<char> buffer(fileSize);
+
+        file.close();
+        return buffer; 
+    }
+
+    /// <summary>
+    /// Converts byte code into a vulkan ussable shader 
+    /// module
+    /// </summary>
+    VkShaderModule CreateShaderModule(const std::vector<char>& code)
+    {
+
+        // Note: We are getting our code data as a char* instead of
+        //       byte data so we need to reinterpret its data type 
+
+        VkShaderModuleCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        createInfo.codeSize = code.size();
+        createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+        VkShaderModule shaderModule;
+        if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to create shader module!");
+        }
+
+        return shaderModule; 
+    }
+
+    #pragma endregion
+
 private: // Main functions 
     void InitWindow()
     {
@@ -910,6 +1005,8 @@ private: // Main functions
         PickPhysicalDevice();
         CreateLogicalDevice();
         CreateSwapChain();
+        CreateImageViews();
+        CreateGraphicsPipeline();
     }
 
     void MainLoop() 
