@@ -97,6 +97,10 @@ private:
     VkPipelineLayout pipelineLayout;
     VkPipeline graphicsPipeline;
 
+    // Have to choose which framebuffer to use for presentation
+    // and then other requirements 
+    std::vector<VkFramebuffer> swapChainFramebuffers; 
+
 private: // Vukan helpers 
     
     #pragma region Instance Creation 
@@ -1275,7 +1279,41 @@ private: // Vukan helpers
 
     #pragma endregion
 
+    #pragma region Drawing
 
+    /// <summary>
+    /// Generates the frame buffers that will be used 
+    /// </summary>
+    void CreateFrameBuffers()
+    {
+        swapChainFramebuffers.resize(swapChainImageViews.size());
+
+        // Iterate through image views and create frame buffers
+        // for each of them 
+        for (size_t i = 0; i < swapChainImageViews.size(); i++)
+        {
+            VkImageView attachments[] = {
+                swapChainImageViews[i]
+            };
+
+            // Need to define which render passes this swapchain is compatible with 
+            VkFramebufferCreateInfo framebufferInfo{};
+            framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            framebufferInfo.renderPass = renderPass;
+            framebufferInfo.attachmentCount = 1;
+            framebufferInfo.pAttachments = attachments;
+            framebufferInfo.width = swapChainExtent.width;
+            framebufferInfo.height = swapChainExtent.height;
+            framebufferInfo.layers = 1;
+
+            if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &swapChainFramebuffers[i]) != VK_SUCCESS)
+            {
+                throw std::runtime_error("Failed to create framebuffer");
+            }
+        }
+    }
+
+    #pragma endregion
 
 private: // Main functions 
     void InitWindow()
@@ -1304,6 +1342,7 @@ private: // Main functions
         CreateImageViews();
         CreateRenderPass();
         CreateGraphicsPipeline();
+        CreateFrameBuffers();
     }
 
     void MainLoop() 
@@ -1316,6 +1355,11 @@ private: // Main functions
 
     void Cleanup() 
     {
+        for (auto framebuffer : swapChainFramebuffers)
+        {
+            vkDestroyFramebuffer(device, framebuffer, nullptr);
+        }
+
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         // Once we have multiple pipelines we can destroy them all here 
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
