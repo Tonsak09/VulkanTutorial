@@ -93,7 +93,9 @@ private:
     VkFormat swapChainImageFormat;
     VkExtent2D swapChainExtent;
 
-    VkPipelineLayout pipelineLayout; 
+    VkRenderPass renderPass;
+    VkPipelineLayout pipelineLayout;
+    VkPipeline graphicsPipeline;
 
 private: // Vukan helpers 
     
@@ -899,8 +901,8 @@ private: // Vukan helpers
     {
         // TODO: Automate the process of pipeline creation 
 
-        auto vertShaderCode = ReadFile("shadaers/vert.spv");
-        auto fragShaderCode = ReadFile("shaders/frag.spv");
+        auto vertShaderCode = ReadFile("Shaders/vert.spv");
+        auto fragShaderCode = ReadFile("Shaders/frag.spv");
 
         VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
@@ -1113,12 +1115,42 @@ private: // Vukan helpers
         pipelineLayoutInfo.pPushConstantRanges = nullptr; 
 
 
-        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, &pipelineLayout, nullptr) != VK_SUCCESS)
+        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
         {
             throw std::runtime_error("Failed to create pipeline layout!");
         }
 
 
+
+        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.stageCount = 2;
+        pipelineInfo.pStages = shaderStages; 
+
+        pipelineInfo.pVertexInputState = &vertexInputInfo;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &rasterizer;
+        pipelineInfo.pMultisampleState = &multisampling;
+        pipelineInfo.pDepthStencilState = nullptr;
+        pipelineInfo.pColorBlendState = &colorBlending;
+        pipelineInfo.pDynamicState = &dynamicState;
+
+        pipelineInfo.layout = pipelineLayout;
+
+        pipelineInfo.renderPass = renderPass;
+        pipelineInfo.subpass = 0; // Index to subpass
+
+        // Lets us derrive a new pipeline from an existing pipeline 
+        pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
+        pipelineInfo.basePipelineIndex = -1;
+
+        // Can take multiple infos and create multriple pipelines 
+        // Can store pipeline cache for reusing 
+        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to create graphics pipeline!");
+        }
 
         // Can be cleaned up after passing it to the graphics pieline 
         vkDestroyShaderModule(device, vertShaderModule, nullptr);
@@ -1142,6 +1174,9 @@ private: // Vukan helpers
 
         size_t fileSize = (size_t)file.tellg();
         std::vector<char> buffer(fileSize);
+
+        file.seekg(0);
+        file.read(buffer.data(), fileSize);
 
         file.close();
         return buffer; 
@@ -1171,7 +1206,76 @@ private: // Vukan helpers
         return shaderModule; 
     }
 
+    /// <summary>
+    /// Tell the pipeline about frame buffer attachments that 
+    /// will be used 
+    /// </summary>
+    void CreateRenderPass()
+    {
+        // Attachment types
+        //  pInputAttachments       Attachments that are read from a shader
+        //  pResolveAttachments     Attachments used for multrisampling color
+        //                          attachments 
+        //  pDepthStenvilAttachment Attachment for depth and stencil data
+        //  pPreserveAttachments    Attachments that are not used by this subpass
+        //                          but for which the data must be preserved 
+
+
+
+        // This format should match the format of the swap chain images
+        VkAttachmentDescription colorAttachment{};
+        colorAttachment.format = swapChainImageFormat;
+        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+
+        // What to do with the data before and after rendering 
+        //
+        //  VK_ATTACHMENT_LOAD_OP_LOAD          Preserve existing contents of attachment
+        //  VK_ATTACHMENT_LOAD_OP_CLEAR         Clears the value to a constant at the start
+        //  VK_ATTACHMENT_LOAD_OP_DONT_CARE     Existenting contents are undefined; we don't
+        //                                      care about them 
+        //  VK_ATTACHMENT_LOAD_OP_STORE         Rendered contents we be store and used later
+        //  VK_ATTACHMENT_STORE_OP_DONT_CARE    Contents in framebuffer become undefined after 
+        //                                      rendering operations
+       
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        VkAttachmentReference colorAttachmentRef{};
+        colorAttachmentRef.attachment = 0; // Index in attachment description array 
+        colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        
+        VkSubpassDescription subpass{};
+        // Can be comopute so must be explicit this is graphics subpass 
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        // Index referneced in fragment shader 
+        // EX: layout(location = 0) out vec4 outColor
+        subpass.colorAttachmentCount = 1; // Count not index! 
+        subpass.pColorAttachments = &colorAttachmentRef;
+
+
+        VkRenderPassCreateInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount = 1;
+        renderPassInfo.pAttachments = &colorAttachment; // Array if multi
+        renderPassInfo.subpassCount = 1;
+        renderPassInfo.pSubpasses = &subpass;
+
+
+
+        if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to create render pass!");
+        }
+    }
+
     #pragma endregion
+
+
 
 private: // Main functions 
     void InitWindow()
@@ -1198,6 +1302,7 @@ private: // Main functions
         CreateLogicalDevice();
         CreateSwapChain();
         CreateImageViews();
+        CreateRenderPass();
         CreateGraphicsPipeline();
     }
 
@@ -1211,8 +1316,12 @@ private: // Main functions
 
     void Cleanup() 
     {
+        vkDestroyPipeline(device, graphicsPipeline, nullptr);
         // Once we have multiple pipelines we can destroy them all here 
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+
+        vkDestroyRenderPass(device, renderPass, nullptr);
+
 
         // Since we created the image views we need to manually 
         // destroy all of them 
