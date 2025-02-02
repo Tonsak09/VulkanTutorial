@@ -104,6 +104,10 @@ private:
     VkCommandPool commandPool;
     VkCommandBuffer commandBuffer; // Cleaned up automatically 
 
+    VkSemaphore imageAvailableSemaphore;
+    VkSemaphore renderFinishedSemaphore;
+    VkFence inFlightFence; 
+
 private: // Vukan helpers 
     
     #pragma region Instance Creation 
@@ -1265,12 +1269,32 @@ private: // Vukan helpers
         subpass.pColorAttachments = &colorAttachmentRef;
 
 
+        // Subpass dependencies 
+        VkSubpassDependency dependency{};
+        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        dependency.dstSubpass = 0;
+
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcAccessMask = 0;
+
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+
+
         VkRenderPassCreateInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         renderPassInfo.attachmentCount = 1;
         renderPassInfo.pAttachments = &colorAttachment; // Array if multi
         renderPassInfo.subpassCount = 1;
         renderPassInfo.pSubpasses = &subpass;
+
+        renderPassInfo.dependencyCount = 1;
+        renderPassInfo.pDependencies = &dependency;
+
+
+
+
 
 
 
@@ -1458,6 +1482,102 @@ private: // Vukan helpers
         }
     }
 
+    /// <summary>
+    /// Updates what is being rendered! 
+    /// </summary>
+    void DrawFrame()
+    {
+        // Outline of frame
+        //  Wait for previous frame 
+        //  Get image from swap chain
+        //  Record command buffer that draws scene onto image
+        //  Submit recorded command buffer
+        //  Present swapchain image
+
+        // Sempahores are either active or not. Semaphore A will signal 
+        // semaphore B with it is done. 
+
+        // If the host needs to know when the GPU has finished something, 
+        // we use a fence. We essentially can cause the code to wait 
+        // where there is a fence 
+
+        // We want to wait for all the fences to return true 
+        vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+        vkResetFences(device, 1, &inFlightFence);
+
+        // Acquire an image from the swap chain
+        uint32_t imageIndex;
+        vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+        // Record command buffer
+        //  Second param is a flag for resting the command buffer 
+        vkResetCommandBuffer(commandBuffer, 0);
+        RecordCommandBuffer(commandBuffer, imageIndex);
+
+        // Submit the command buffer 
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+        VkSemaphore waitSemaphores[] = { imageAvailableSemaphore }; // Adds semaphore 
+        VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = waitSemaphores; 
+        submitInfo.pWaitDstStageMask = waitStages;
+
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer; 
+
+        // What to signal after command buffers have finished execution 
+        VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = signalSemaphores; 
+
+        if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to submit draw command buffer");
+        }
+
+
+        // Presentation 
+        VkPresentInfoKHR presentInfo{};
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+        presentInfo.waitSemaphoreCount = 1;
+        presentInfo.pWaitSemaphores = signalSemaphores;
+
+        VkSwapchainKHR swapChains[]{ swapChain };
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = swapChains;
+        presentInfo.pImageIndices = &imageIndex; 
+
+        // Can be used to hold an array of VkResult to check if each
+        // swap chain is successful 
+        presentInfo.pResults = nullptr;
+
+        vkQueuePresentKHR(presentQueue, &presentInfo);
+    }
+
+    /// <summary>
+    /// Creates the vulkan specific semaphore 
+    /// </summary>
+    void CreateSyncObjects()
+    {
+        VkSemaphoreCreateInfo semaphoreInfo{};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+        // Similiar creation pattern for semaphores and fences 
+        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
+            vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
+            vkCreateFence(device, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to create semaphores!");
+        }
+    }
+
     #pragma endregion
 
 private: // Main functions 
@@ -1488,6 +1608,9 @@ private: // Main functions
         CreateRenderPass();
         CreateGraphicsPipeline();
         CreateFrameBuffers();
+        CreateCommandPool();
+        CreateCommandBuffer();
+        CreateSyncObjects();
     }
 
     void MainLoop() 
@@ -1495,11 +1618,19 @@ private: // Main functions
         while (!glfwWindowShouldClose(window))
         {
             glfwPollEvents();
+            DrawFrame();
         }
+
+        // Wait for our device since they are async
+        vkDeviceWaitIdle(device);
     }
 
     void Cleanup() 
     {
+        vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
+        vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
+        vkDestroyFence(device, inFlightFence, nullptr);
+
         vkDestroyCommandPool(device, commandPool, nullptr);
 
         for (auto framebuffer : swapChainFramebuffers)
