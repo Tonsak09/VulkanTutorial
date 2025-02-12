@@ -106,11 +106,13 @@ private:
     std::vector<VkCommandBuffer> commandBuffers; // Cleaned up automatically 
     std::vector<VkSemaphore> imageAvailableSemaphores; 
     std::vector<VkSemaphore> renderFinishedSemaphores; 
-    std::vector<VkFence> inFlightFences;
 
     // How many frames can be processed concurrently 
     const int MAX_FRAMES_IN_FLIGHT = 2;
     uint32_t currentFrame = 0; 
+
+    std::vector<VkFence> inFlightFences;
+    bool frameBufferResized = false; 
 
 private: // Vukan helpers 
     
@@ -1511,11 +1513,27 @@ private: // Vukan helpers
 
         // We want to wait for all the fences to return true 
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
-        vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
         // Acquire an image from the swap chain
         uint32_t imageIndex;
-        vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+        VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+        // Check if swap chain is valid 
+        if (result == VK_ERROR_OUT_OF_DATE_KHR)
+        {
+            // Swapchain out of date
+            RecreateSwapChain();
+            return;
+        }
+        else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
+        {
+            // Swapchain unobtainable 
+            throw std::runtime_error("Failed to aquire swap chain image!");
+        }
+
+        // Only reset the fence after we know the swapchain is valid 
+        vkResetFences(device, 1, &inFlightFences[currentFrame]);
+
 
         // Record command buffer
         //  Second param is a flag for resting the command buffer 
@@ -1562,7 +1580,21 @@ private: // Vukan helpers
         // swap chain is successful 
         presentInfo.pResults = nullptr;
 
-        vkQueuePresentKHR(presentQueue, &presentInfo);
+        result = vkQueuePresentKHR(presentQueue, &presentInfo);
+
+        // Check if present queue is valid 
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || frameBufferResized)
+        {
+            // We want to do this after presenting to make sure
+            // that the semaphores we have connected to vulkan 
+            // are in a consistent state 
+            frameBufferResized = false; 
+            RecreateSwapChain();
+        }
+        else if (result != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to present swap chain image!");
+        }
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
@@ -1610,8 +1642,58 @@ private: // Vukan helpers
         //}
     }
 
+    static void FramebufferResizeCallback(GLFWwindow* window, int width, int height)
+    {
+        auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        app->frameBufferResized = true; 
+    }
+
 
     #pragma endregion
+
+    /// <summary>
+    /// Cleans up the swap chain and its resources 
+    /// </summary>
+    void CleanupSwapChain()
+    {
+        for (size_t i = 0; i < swapChainFramebuffers.size(); i++)
+        {
+            vkDestroyFramebuffer(device, swapChainFramebuffers[i], nullptr);
+        }
+
+        for (size_t i = 0; i < swapChainImageViews.size(); i++)
+        {
+            vkDestroyImageView(device, swapChainImageViews[i], nullptr);
+        }
+
+        vkDestroySwapchainKHR(device, swapChain, nullptr);
+    }
+
+    /// <summary>
+    /// If the window surface changes at all make sure to 
+    /// recreate resources connected to it 
+    /// </summary>
+    void RecreateSwapChain()
+    {
+        int width = 0, height = 0;
+        glfwGetFramebufferSize(window, &width, &height);
+        while (width == 0 || height == 0)
+        {
+            // Handle minimizing 
+            glfwGetFramebufferSize(window, &width, &height);
+            glfwWaitEvents();
+        }
+
+        // Note: This implementation requires us to 
+        //       wait for all rendering to stop first 
+        vkDeviceWaitIdle(device);
+
+        CleanupSwapChain();
+
+        CreateSwapChain();
+        CreateImageViews();
+        CreateFrameBuffers();
+    }
 
 private: // Main functions 
     void InitWindow()
@@ -1620,13 +1702,14 @@ private: // Main functions
 
         // Tell application to not create an OpenGL context 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
 
         // Generate window 
         //      Fourth parameter lets us choose a montitor to open to
         //      Fifth parameter is only relevant to OpenGL
         window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+        glfwSetWindowUserPointer(window, this); // Setsup user pointer 
+        glfwSetFramebufferSizeCallback(window, FramebufferResizeCallback);
     }
 
     void InitVulkan() 
@@ -1660,22 +1743,7 @@ private: // Main functions
 
     void Cleanup() 
     {
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-        {
-            vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
-            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
-            vkDestroyFence(device, inFlightFences[i], nullptr);
-        }
-        
-        
-        
-
-        vkDestroyCommandPool(device, commandPool, nullptr);
-
-        for (auto framebuffer : swapChainFramebuffers)
-        {
-            vkDestroyFramebuffer(device, framebuffer, nullptr);
-        }
+        CleanupSwapChain();
 
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         // Once we have multiple pipelines we can destroy them all here 
@@ -1683,15 +1751,15 @@ private: // Main functions
 
         vkDestroyRenderPass(device, renderPass, nullptr);
 
-
-        // Since we created the image views we need to manually 
-        // destroy all of them 
-        for (auto imageView : swapChainImageViews)
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            vkDestroyImageView(device, imageView, nullptr);
+            vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+            vkDestroyFence(device, inFlightFences[i], nullptr);
         }
 
-        vkDestroySwapchainKHR(device, swapChain, nullptr);
+        vkDestroyCommandPool(device, commandPool, nullptr);
+
         vkDestroyDevice(device, nullptr);
 
         if (enableValidationLayers)
@@ -1701,6 +1769,7 @@ private: // Main functions
 
         vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroyInstance(instance, nullptr);
+
 
         glfwDestroyWindow(window);
 
