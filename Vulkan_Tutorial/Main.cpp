@@ -20,8 +20,12 @@
 #include <algorithm> // for std::clamp 
 
 #include <optional>
+#include <array>
 
 #include <fstream>
+
+#include <glm/glm.hpp>
+
 
 class HelloTriangleApplication {
 public:
@@ -865,6 +869,50 @@ private: // Vukan helpers
         // We now finally have a set of images we can draw to! 
     }
 
+    /// <summary>
+    /// Cleans up the swap chain and its resources 
+    /// </summary>
+    void CleanupSwapChain()
+    {
+        for (size_t i = 0; i < swapChainFramebuffers.size(); i++)
+        {
+            vkDestroyFramebuffer(device, swapChainFramebuffers[i], nullptr);
+        }
+
+        for (size_t i = 0; i < swapChainImageViews.size(); i++)
+        {
+            vkDestroyImageView(device, swapChainImageViews[i], nullptr);
+        }
+
+        vkDestroySwapchainKHR(device, swapChain, nullptr);
+    }
+
+    /// <summary>
+    /// If the window surface changes at all make sure to 
+    /// recreate resources connected to it 
+    /// </summary>
+    void RecreateSwapChain()
+    {
+        int width = 0, height = 0;
+        glfwGetFramebufferSize(window, &width, &height);
+        while (width == 0 || height == 0)
+        {
+            // Handle minimizing 
+            glfwGetFramebufferSize(window, &width, &height);
+            glfwWaitEvents();
+        }
+
+        // Note: This implementation requires us to 
+        //       wait for all rendering to stop first 
+        vkDeviceWaitIdle(device);
+
+        CleanupSwapChain();
+
+        CreateSwapChain();
+        CreateImageViews();
+        CreateFrameBuffers();
+    }
+
 
     #pragma endregion
 
@@ -978,10 +1026,14 @@ private: // Vukan helpers
 
         VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
         vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertexInputInfo.vertexBindingDescriptionCount = 0;
-        vertexInputInfo.pVertexBindingDescriptions = nullptr;
-        vertexInputInfo.vertexAttributeDescriptionCount = 0;
-        vertexInputInfo.pVertexAttributeDescriptions = nullptr;
+
+        auto bindingDescription = Vertex::GetBindingDescription(); // Description of entire vertex
+        auto attributeDescriptions = Vertex::GetAttributeDescriptions(); // Description of vertex parts
+
+        vertexInputInfo.vertexBindingDescriptionCount = 1;
+        vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+        vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
         // ------------ Input Assumbly ------------
 
@@ -1651,50 +1703,82 @@ private: // Vukan helpers
 
     #pragma endregion
 
-    /// <summary>
-    /// Cleans up the swap chain and its resources 
-    /// </summary>
-    void CleanupSwapChain()
+    #pragma region Vertex Buffers 
+
+    struct Vertex
     {
-        for (size_t i = 0; i < swapChainFramebuffers.size(); i++)
+        glm::vec2 pos;
+        glm::vec3 color; 
+
+        /// <summary>
+        /// How to pass the data format to the vertex
+        /// shader once it is on the GPU 
+        /// </summary>
+        /// <returns></returns>
+        static VkVertexInputBindingDescription GetBindingDescription()
         {
-            vkDestroyFramebuffer(device, swapChainFramebuffers[i], nullptr);
+            // Note: Here we are defining the rate to load memory 
+            //       from each of the verticies. It defines how 
+            //       much memory each vertex will take
+
+            // Inputrate is essentially whether we are sending data
+            // on a vertex basis or instance basis 
+            //      VK_VERTEX_INPUT_RATE_VERTEX 
+            //      VK_VERTEX_INPUT_RATE_INSTANCE 
+
+            VkVertexInputBindingDescription bindingDescription{};
+            bindingDescription.binding = 0;
+            bindingDescription.stride = sizeof(Vertex);
+            bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+            return bindingDescription;
         }
 
-        for (size_t i = 0; i < swapChainImageViews.size(); i++)
+        /// <summary>
+        /// Describes each part of the data being sent 
+        /// </summary>
+        /// <returns></returns>
+        static std::array<VkVertexInputAttributeDescription, 2> GetAttributeDescriptions()
         {
-            vkDestroyImageView(device, swapChainImageViews[i], nullptr);
+            std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+
+            // Binding: Tells vulkan from which "binding" the vertex data comes from
+            // Location: References shader in location 
+            // Format: Describes the type of data. 
+            //      float   :  VK_FORMAT_R32_SFLOAT
+            //      vec2    :  VK_FORMAT_R32G32_SFLOAT
+            //      vec3    :  VK_FORMAT_R32G32B32_SFLOAT
+            //      vec4    :  VK_FORMAT_R32G32B32A32_SFLOAT
+            //      ivec2   :  VK_FORMAT_R32G32_SINT
+            //      uvec4   :  VK_FORMAT_R32G32B32A32_UINT
+            //      double  :  VK_FORMAT_R64_SFLOAT 
+            // Offset: Size of this part of the data  
+
+            // Position part of the vertex 
+            attributeDescriptions[0].binding = 0;
+            attributeDescriptions[0].location = 0;
+            attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+            attributeDescriptions[0].offset = offsetof(Vertex, pos);
+            
+            attributeDescriptions[1].binding = 0;
+            attributeDescriptions[1].location = 1;
+            attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+            return attributeDescriptions;
         }
 
-        vkDestroySwapchainKHR(device, swapChain, nullptr);
-    }
+    };
 
-    /// <summary>
-    /// If the window surface changes at all make sure to 
-    /// recreate resources connected to it 
-    /// </summary>
-    void RecreateSwapChain()
+    const std::vector<Vertex> vertices =
     {
-        int width = 0, height = 0;
-        glfwGetFramebufferSize(window, &width, &height);
-        while (width == 0 || height == 0)
-        {
-            // Handle minimizing 
-            glfwGetFramebufferSize(window, &width, &height);
-            glfwWaitEvents();
-        }
+        {{ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+        {{ 0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},
+        {{-0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}}
+    };
 
-        // Note: This implementation requires us to 
-        //       wait for all rendering to stop first 
-        vkDeviceWaitIdle(device);
-
-        CleanupSwapChain();
-
-        CreateSwapChain();
-        CreateImageViews();
-        CreateFrameBuffers();
-    }
-
+    #pragma endregion 
+    
 private: // Main functions 
     void InitWindow()
     {
